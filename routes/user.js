@@ -16,14 +16,35 @@ module.exports = async function (fastify, opts) {
   //     token: '123456'
   //   }
   // }
+  const users = {}; // Stocker les profils des utilisateurs en mémoire (à des fins de démonstration)
+
   fastify.route({
     url: '/api/user',
     method: 'GET',
     preHandler: validateToken,
     handler: async (req, reply) => {
       // add the route implementation here
+
+          try {
+            const userId = req.userId;
+      
+            if (users[userId]) {
+              const userProfile = {
+                email: users[userId].email,
+                username: users[userId].username,
+                token: users[userId].token
+              };
+              reply.code(200).send({ user: userProfile });
+            } else {
+              reply.code(404).send({ error: 'User not found' });
+            }
+          } catch (error) {
+            console.error(error);
+            reply.code(500).send({ error: 'An error occurred while retrieving the user profile' });
+          }
+        }
+      });
     }
-  })
 
   // --- SIGN UP ---
   // this route should receive the following fields on the request body: user.username, user.email and user.password
@@ -45,8 +66,29 @@ module.exports = async function (fastify, opts) {
     method: 'POST',
     handler: async (req, reply) => {
       // add the route implementation here
-    }
-  })
+
+          try {
+            const { username, email, password } = req.body;
+      
+            const token = await generateToken(username);
+      
+            const hashedPassword = await hashString(password);
+      
+            const newUser = {
+              username: username,
+              email: email,
+              password: hashedPassword,
+              token: token
+            };
+            await insertUser(newUser);
+      
+            reply.code(201).send({ user: { username, email, token } });
+          } catch (error) {
+            console.error(error);
+            reply.code(500).send({ error: 'An error occurred during user registration' });
+          }
+        }
+      });
 
   // --- LOGIN ---
   // this route should receive on the request body only two fields: user.email and user.password
@@ -76,6 +118,33 @@ module.exports = async function (fastify, opts) {
         message: 'Invalid credentials'
       }
     }
+      try {
+        const { email, password } = req.body.user;
+    
+        const user = await fastify.mysql.query('SELECT * FROM user WHERE email = ?', [email]);
+    
+        if (user.length === 0) {
+          reply.status(401).send({ message: 'Invalid identifiers' });
+          return;
+        }
+    
+        const passwordMatch = await stringIsAMatch(password, user[0].password);
+    
+        if (!passwordMatch) {
+          reply.status(401).send({ message: 'Invalid identifiers' });
+          return;
+        }
+    
+        const token = await generateToken(user[0].username);
+    
+        reply.status(200).send({
+          user: {
+            username: user[0].username,
+            email: user[0].email,
+            token: token
+          }
+        });
+
     return {
       user: {
         username: user.username,
@@ -83,7 +152,11 @@ module.exports = async function (fastify, opts) {
         email: user.email,
       }
     }
-  })
+  } catch (error) {
+    console.error(error);
+    reply.status(500).send({ message: 'An error occurred while connecting' });
+  }
+});
 
   // --- do not modify ---
   fastify.put('/api/user', async (req, reply) => req.body)
@@ -94,4 +167,3 @@ module.exports = async function (fastify, opts) {
       profile: user
     }
   })
-}
